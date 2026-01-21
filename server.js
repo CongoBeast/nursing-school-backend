@@ -23,7 +23,12 @@ const JWT_SECRET = 'your_jwt_secret'; // Use a strong, secret key in production
 
 app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }));
-app.use(cors());
+// app.use(cors());
+app.use(cors({
+  origin: '*', // For development you can use '*', but specific URL is safer
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'api-key']
+}));
 
 const generateToken = (userId) => {
     const secretKey = 'your-secret-key'; // Replace with your own secret key
@@ -283,4 +288,5 @@ app.post('/upload', upload.single('image'), async (req, res) => {
   app.listen(PORT, () => {
     console.log(`Server is running on port ${PORT}`);
   });
+
   
