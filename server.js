@@ -556,7 +556,70 @@ app.post('/upload', upload.single('image'), async (req, res) => {
 //   console.log(`🚀 Server running on port ${PORT}`);
 // });
 
+/* =========================
+   Health Check / Test Route
+========================= */
+
+app.get('/health', (req, res) => {
+  res.json({
+    status: 'OK',
+    message: 'Server is running normally',
+    timestamp: new Date().toISOString(),
+    cors: 'enabled',
+    mongodb: db ? 'connected' : 'disconnected'
+  });
+});
+
+app.get('/test', async (req, res) => {
+  try {
+    // Test MongoDB connection
+    await db.admin().ping();
+    
+    res.json({
+      status: 'success',
+      server: 'running',
+      mongodb: 'connected',
+      database: db.databaseName,
+      timestamp: new Date().toISOString(),
+      cors: {
+        enabled: true,
+        allowedOrigins: [
+          'http://localhost:3000',
+          'https://nursing-school-frontend.vercel.app'
+        ]
+      }
+    });
+  } catch (error) {
+    res.status(500).json({
+      status: 'error',
+      message: error.message,
+      mongodb: 'disconnected'
+    });
+  }
+});
+
+// Test CORS specifically
+app.post('/test-cors', (req, res) => {
+  res.json({
+    status: 'success',
+    message: 'CORS is working - POST request successful',
+    receivedData: req.body,
+    headers: {
+      origin: req.headers.origin,
+      'user-agent': req.headers['user-agent']
+    }
+  });
+});
+```
+
+## How to Test:
+
+### 1. **Test from browser (GET request):**
+```
+https://nursing-school-backend.vercel.app/health
+
 startServer();
+
 
 
 
