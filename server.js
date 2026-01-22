@@ -312,11 +312,24 @@ const JWT_SECRET = 'your_jwt_secret';
 app.use(express.json());
 app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }));
-app.use(cors({
-  origin: '*',
+
+const corsOptions = {
+  origin: [
+    'http://localhost:3000',
+    'https://nursing-school-frontend.vercel.app'
+  ],
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization']
-}));
+  allowedHeaders: ['Content-Type', 'Authorization'],
+  credentials: true,
+};
+
+app.use(cors(corsOptions));
+app.options('*', cors(corsOptions)); // 👈 THIS FIXES PREFLIGHT
+// app.use(cors({
+//   origin: '*',
+//   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+//   allowedHeaders: ['Content-Type', 'Authorization']
+// }));
 
 /* =========================
    MongoDB Connection
@@ -526,4 +539,5 @@ app.post('/upload', upload.single('image'), async (req, res) => {
 // app.listen(PORT, () => {
 //   console.log(`🚀 Server running on port ${PORT}`);
 // });
+
 startServer();
