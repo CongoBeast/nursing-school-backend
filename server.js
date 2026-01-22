@@ -331,6 +331,13 @@ app.options('*', cors(corsOptions)); // 👈 THIS FIXES PREFLIGHT
 //   allowedHeaders: ['Content-Type', 'Authorization']
 // }));
 
+app.use((req, res, next) => {
+  res.header('Access-Control-Allow-Origin', req.headers.origin || '*');
+  res.header('Access-Control-Allow-Methods', 'GET,POST,PUT,DELETE,OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  next();
+});
+
 /* =========================
    MongoDB Connection
 ========================= */
@@ -541,3 +548,4 @@ app.post('/upload', upload.single('image'), async (req, res) => {
 // });
 
 startServer();
+
