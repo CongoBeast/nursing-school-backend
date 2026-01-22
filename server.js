@@ -332,7 +332,6 @@ const corsOptions = {
   optionsSuccessStatus: 200
 };
 
-
 app.use(cors(corsOptions));
 // app.options('*', cors(corsOptions)); //  THIS FIXES PREFLIGHT
 // app.use(cors({
@@ -558,5 +557,6 @@ app.post('/upload', upload.single('image'), async (req, res) => {
 // });
 
 startServer();
+
 
 
