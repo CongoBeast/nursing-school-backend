@@ -82,6 +82,8 @@ async function startServer() {
     db = client.db('nursing-school');
     usersCollection = db.collection('users');
 
+    // await seedHousingCollection();
+
     console.log('✅ MongoDB connected');
 
     app.listen(PORT, () => {
@@ -94,9 +96,6 @@ async function startServer() {
   }
 }
 
-
-
-
 async function connectDB() {
   await client.connect();
   db = client.db('nursing-school');
@@ -105,6 +104,54 @@ async function connectDB() {
 }
 
 connectDB().catch(console.error);
+
+
+/* =========================
+   Database Seeding Utility
+========================= */
+
+// async function seedHousingCollection() {
+//   try {
+//     const housingCollection = db.collection('housing');
+    
+//     // Check if data already exists to avoid duplicates
+//     const count = await housingCollection.countDocuments();
+//     if (count > 0) {
+//       console.log('ℹ️ Housing collection already populated. Skipping seed.');
+//       return;
+//     }
+
+//     const rooms = [];
+
+//     // Generate Adlam House Rooms (119)
+//     for (let i = 1; i <= 119; i++) {
+//       rooms.push({
+//         house: 'Adlam House',
+//         roomNumber: `A${i.toString().padStart(2, '0')}`, // e.g., A01, A119
+//         residents: [],
+//         fault_reports: [],
+//         status: 'available'
+//       });
+//     }
+
+//     // Generate Nurse Home Rooms (122)
+//     for (let i = 1; i <= 122; i++) {
+//       rooms.push({
+//         house: 'Nurse Home',
+//         roomNumber: `N${i.toString().padStart(2, '0')}`, // e.g., N01, N122
+//         residents: [],
+//         fault_reports: [],
+//         status: 'available'
+//       });
+//     }
+
+//     const result = await housingCollection.insertMany(rooms);
+//     console.log(`✅ Successfully seeded housing collection with ${result.insertedCount} rooms.`);
+
+//   } catch (error) {
+//     console.error('❌ Error seeding housing collection:', error);
+//   }
+// }
 
 /* =========================
    Utilities
@@ -403,6 +450,405 @@ app.post('/upload', upload.single('image'), async (req, res) => {
   } catch (error) {
     console.error(error);
     res.status(500).json({ success: false });
+  }
+});
+
+/* =========================
+   Students with Housing Info
+========================= */
+
+app.get('/get-students-with-housing', async (req, res) => {
+  try {
+    const housingCollection = db.collection('housing');
+    
+    // Get only users where userType is 'student'
+    const students = await usersCollection.find({ userType: 'student' }).toArray();
+    
+    // Get all housing data
+    const housingData = await housingCollection.find({}).toArray();
+    
+    // Create a map of userId to housing info
+    const housingMap = {};
+    housingData.forEach(room => {
+      room.residents.forEach(residentId => {
+        housingMap[residentId] = {
+          house: room.house,
+          roomNumber: room.roomNumber,
+          status: room.status
+        };
+      });
+    });
+    
+    // Combine student data with housing info
+    const studentsWithHousing = students.map(student => {
+      const housing = housingMap[student._id.toString()] || {};
+      const { hashedPassword, ...studentWithoutPassword } = student;
+      
+      return {
+        ...studentWithoutPassword,
+        dormHouse: housing.house || '',
+        dormNumber: housing.roomNumber || '',
+        roomStatus: housing.status || 'unassigned'
+      };
+    });
+    
+    res.json(studentsWithHousing);
+
+    // console.log(studentsWithHousing);
+    
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: 'Failed to fetch students with housing' });
+  }
+});
+
+/* =========================
+   Housing Management Routes
+========================= */
+
+app.post('/assign-student-housing', async (req, res) => {
+  try {
+    const { studentId, house, roomNumber } = req.body;
+
+    if (!studentId || !house || !roomNumber) {
+      return res.status(400).json({ message: 'Missing required fields' });
+    }
+
+    const housingCollection = db.collection('housing');
+    const housingRecordsCollection = db.collection('student_housing_records');
+
+    // Find the student to get their _id
+    const student = await usersCollection.findOne({ studentId });
+    if (!student) {
+      return res.status(404).json({ message: 'Student not found' });
+    }
+
+    // Find the room
+    const room = await housingCollection.findOne({ house, roomNumber });
+
+    if (!room) {
+      return res.status(404).json({ message: 'Room not found' });
+    }
+
+    // Check if room is full (2 or more residents)
+    if (room.residents && room.residents.length >= 2) {
+      return res.status(400).json({ 
+        message: 'Room is full', 
+        currentResidents: room.residents.length 
+      });
+    }
+
+    // Add student's _id to room (not studentId)
+    await housingCollection.updateOne(
+      { house, roomNumber },
+      { 
+        $push: { residents: student._id.toString() },
+        $set: { status: room.residents.length === 1 ? 'occupied' : 'available' }
+      }
+    );
+
+    // Create housing record
+    await housingRecordsCollection.insertOne({
+      studentId,
+      action: 'assigned',
+      description: `Student ${studentId} has been assigned to ${house} - Room ${roomNumber}`,
+      house,
+      roomNumber,
+      timestamp: new Date(),
+      performedBy: req.body.performedBy || 'admin'
+    });
+
+    res.json({ success: true, message: 'Student assigned successfully' });
+
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: 'Failed to assign student' });
+  }
+});
+
+app.post('/move-student-housing', async (req, res) => {
+  try {
+    const { studentId, currentHouse, currentRoom, newHouse, newRoom } = req.body;
+
+    if (!studentId || !newHouse || !newRoom) {
+      return res.status(400).json({ message: 'Missing required fields' });
+    }
+
+    const housingCollection = db.collection('housing');
+    const housingRecordsCollection = db.collection('student_housing_records');
+
+    // Find the student to get their _id
+    const student = await usersCollection.findOne({ studentId });
+    if (!student) {
+      return res.status(404).json({ message: 'Student not found' });
+    }
+
+    // Find the new room
+    const newRoomData = await housingCollection.findOne({ house: newHouse, roomNumber: newRoom });
+
+    if (!newRoomData) {
+      return res.status(404).json({ message: 'New room not found' });
+    }
+
+    // Check if new room is full
+    if (newRoomData.residents && newRoomData.residents.length >= 2) {
+      return res.status(400).json({ 
+        message: 'New room is full', 
+        currentResidents: newRoomData.residents.length 
+      });
+    }
+
+    // Remove student from old room if they have one
+    if (currentHouse && currentRoom) {
+      const oldRoom = await housingCollection.findOne({ house: currentHouse, roomNumber: currentRoom });
+      await housingCollection.updateOne(
+        { house: currentHouse, roomNumber: currentRoom },
+        { 
+          $pull: { residents: student._id.toString() },
+          $set: { status: oldRoom.residents.length <= 2 ? 'available' : 'occupied' }
+        }
+      );
+    }
+
+    // Add student to new room
+    await housingCollection.updateOne(
+      { house: newHouse, roomNumber: newRoom },
+      { 
+        $push: { residents: student._id.toString() },
+        $set: { status: newRoomData.residents.length === 1 ? 'occupied' : 'available' }
+      }
+    );
+
+    // Create housing record
+    const description = currentHouse && currentRoom 
+      ? `Student ${studentId} has been moved from ${currentHouse} - Room ${currentRoom} to ${newHouse} - Room ${newRoom}`
+      : `Student ${studentId} has been assigned to ${newHouse} - Room ${newRoom}`;
+
+    await housingRecordsCollection.insertOne({
+      studentId,
+      action: 'moved',
+      description,
+      oldHouse: currentHouse || null,
+      oldRoom: currentRoom || null,
+      newHouse,
+      newRoom,
+      timestamp: new Date(),
+      performedBy: req.body.performedBy || 'admin'
+    });
+
+    res.json({ success: true, message: 'Student moved successfully' });
+
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: 'Failed to move student' });
+  }
+});
+
+app.post('/deactivate-student-housing', async (req, res) => {
+  try {
+    const { studentId, house, roomNumber } = req.body;
+
+    if (!studentId || !house || !roomNumber) {
+      return res.status(400).json({ message: 'Missing required fields' });
+    }
+
+    const housingCollection = db.collection('housing');
+    const housingRecordsCollection = db.collection('student_housing_records');
+
+    // Find the student to get their _id
+    const student = await usersCollection.findOne({ studentId });
+    if (!student) {
+      return res.status(404).json({ message: 'Student not found' });
+    }
+
+    // Find the room
+    const room = await housingCollection.findOne({ house, roomNumber });
+
+    if (!room) {
+      return res.status(404).json({ message: 'Room not found' });
+    }
+
+    // Remove student from room
+    await housingCollection.updateOne(
+      { house, roomNumber },
+      { 
+        $pull: { residents: student._id.toString() },
+        $set: { status: room.residents.length <= 2 ? 'available' : 'occupied' }
+      }
+    );
+
+    // Create housing record
+    await housingRecordsCollection.insertOne({
+      studentId,
+      action: 'deactivated',
+      description: `Student ${studentId} has been removed from ${house} - Room ${roomNumber}`,
+      house,
+      roomNumber,
+      timestamp: new Date(),
+      performedBy: req.body.performedBy || 'admin'
+    });
+
+    res.json({ success: true, message: 'Student housing deactivated successfully' });
+
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: 'Failed to deactivate student housing' });
+  }
+});
+
+
+/* =========================
+   Room Occupancy Overview
+========================= */
+
+app.get('/get-room-occupancy', async (req, res) => {
+  try {
+    const housingCollection = db.collection('housing');
+    
+    // Get all rooms with their residents
+    const rooms = await housingCollection.find({}).toArray();
+    
+    // Get all students to map their info
+    const students = await usersCollection.find({ userType: 'student' }).toArray();
+    
+    // Create a map of student _id to student info
+    const studentMap = {};
+    students.forEach(student => {
+      studentMap[student._id.toString()] = {
+        studentId: student.studentId,
+        username: student.username,
+        gender: student.gender,
+        photo: student.photo || student.avatar
+      };
+    });
+    
+    // Enhance rooms with resident details
+    const roomsWithDetails = rooms.map(room => ({
+      house: room.house,
+      roomNumber: room.roomNumber,
+      status: room.status,
+      capacity: 2,
+      occupancy: room.residents.length,
+      residents: room.residents.map(residentId => studentMap[residentId] || { studentId: 'Unknown', username: 'Unknown' })
+    }));
+    
+    // Group by house
+    const adlamRooms = roomsWithDetails.filter(r => r.house === 'Adlam House');
+    const nurseRooms = roomsWithDetails.filter(r => r.house === 'Nurse Home');
+    
+    res.json({
+      adlamHouse: {
+        totalRooms: 119,
+        rooms: adlamRooms,
+        occupied: adlamRooms.filter(r => r.occupancy > 0).length,
+        available: adlamRooms.filter(r => r.occupancy === 0).length,
+        full: adlamRooms.filter(r => r.occupancy >= 2).length
+      },
+      nurseHome: {
+        totalRooms: 122,
+        rooms: nurseRooms,
+        occupied: nurseRooms.filter(r => r.occupancy > 0).length,
+        available: nurseRooms.filter(r => r.occupancy === 0).length,
+        full: nurseRooms.filter(r => r.occupancy >= 2).length
+      }
+    });
+
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: 'Failed to fetch room occupancy' });
+  }
+});
+
+/* =========================
+   Fault Reports Routes
+========================= */
+
+app.post('/add-fault-report', upload.single('image'), async (req, res) => {
+  try {
+    const { house, roomNumber, item, details, discoveryDate, reportedBy } = req.body;
+
+    if (!house || !roomNumber || !item || !discoveryDate || !reportedBy) {
+      return res.status(400).json({ message: 'Missing required fields' });
+    }
+
+    const faultReportsCollection = db.collection('fault_reports');
+
+    // Generate fault report ID (e.g., FR-2026-001)
+    const year = new Date().getFullYear();
+    const count = await faultReportsCollection.countDocuments();
+    const faultReportId = `FR-${year}-${String(count + 1).padStart(3, '0')}`;
+
+    // Upload image to Cloudinary if provided
+    let imageUrl = null;
+    if (req.file) {
+      const result = await cloudinary.uploader.upload(req.file.path, {
+        folder: 'fault_reports'
+      });
+      fs.unlinkSync(req.file.path);
+      imageUrl = result.secure_url;
+    }
+
+    const result = await faultReportsCollection.insertOne({
+      faultReportId,
+      house,
+      roomNumber,
+      item,
+      details: details || '',
+      discoveryDate,
+      reportedBy,
+      imageUrl,
+      status: 'Pending',
+      createdAt: new Date()
+    });
+
+    res.json({ success: true, faultReportId: result.insertedId });
+
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: 'Failed to add fault report' });
+  }
+});
+
+app.get('/get-fault-reports', async (req, res) => {
+  try {
+    const faultReportsCollection = db.collection('fault_reports');
+    const reports = await faultReportsCollection
+      .find({})
+      .sort({ createdAt: -1 })
+      .toArray();
+    
+    res.json(reports);
+
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: 'Failed to fetch fault reports' });
+  }
+});
+
+app.put('/update-fault-status', async (req, res) => {
+  try {
+    const { faultReportId, status } = req.body;
+
+    if (!faultReportId || !status) {
+      return res.status(400).json({ message: 'Missing required fields' });
+    }
+
+    const faultReportsCollection = db.collection('fault_reports');
+
+    const result = await faultReportsCollection.updateOne(
+      { _id: new ObjectId(faultReportId) },
+      { $set: { status, updatedAt: new Date() } }
+    );
+
+    if (result.matchedCount === 0) {
+      return res.status(404).json({ message: 'Fault report not found' });
+    }
+
+    res.json({ success: true, message: 'Status updated successfully' });
+
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: 'Failed to update status' });
   }
 });
 
