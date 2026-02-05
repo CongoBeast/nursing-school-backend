@@ -23,6 +23,34 @@ app.use(express.json());
 app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }));
 
+const { MailtrapClient } = require("mailtrap");
+
+const TOKEN = "f7a7fd52c5c1f3c5ac232ceaf4536227";
+
+const mailClient = new MailtrapClient({
+  token: TOKEN,
+});
+
+const sender = {
+  email: "hello@demomailtrap.co",
+  name: "Mailtrap Test",
+};
+const recipients = [
+  {
+    email: "thomasmethembe43@gmail.com",
+  },
+];
+
+mailClient
+  .send({
+    from: sender,
+    to: recipients,
+    subject: "You are awesome!",
+    text: "Congrats for sending test email with Mailtrap!",
+    category: "Integration Test",
+  })
+  .then(console.log, console.error);
+
 const corsOptions = {
   origin: true, // reflect request origin
   credentials: true,
@@ -60,7 +88,7 @@ async function startServer() {
 
     await client.connect();
 
-    db = client.db("nursing-school");
+    db = client.db("nursing-school-prod");
     usersCollection = db.collection("users");
 
     // await seedHousingCollection();
@@ -78,7 +106,7 @@ async function startServer() {
 
 async function connectDB() {
   await client.connect();
-  db = client.db("nursing-school");
+  db = client.db("nursing-school-prod");
   usersCollection = db.collection("users");
   console.log("✅ Connected to MongoDB");
 }
@@ -190,6 +218,24 @@ app.post("/register", async (req, res) => {
       isLoggedOn: false,
     });
 
+    // ✅ Create welcome notification
+    // await createNotification(
+    //   result.insertedId.toString(),
+    //   username,
+    //   "account_created",
+    //   "Your account has been successfully created"
+    // );
+
+    const notificationsCollection = db.collection("user_notifications");
+    await notificationsCollection.insertOne({
+      userId: result.insertedId.toString(),
+      username: username,
+      notificationType: "signup",
+      message: `Dear ${username}, thank you for signing up`,
+      timestamp: new Date(),
+      read: false,
+    });
+
     const token = generateToken(result.insertedId.toString());
     res.json({ token });
   } catch (err) {
@@ -203,10 +249,10 @@ app.post("/login", async (req, res) => {
     const { username, password } = req.body;
 
     const user = await usersCollection.findOne({ username });
-    if (!user) return res.status(401).send("Invalid credentials");
+    if (!user) return res.status(401).json({ message: "Invalid credentials" });
 
     const valid = bcrypt.compareSync(password, user.hashedPassword);
-    if (!valid) return res.status(401).send("Invalid credentials");
+    if (!valid) return res.status(401).json({ message: "Invalid credentials" });
 
     const token = jwt.sign({ userId: user._id }, JWT_SECRET, {
       expiresIn: "1h",
@@ -217,10 +263,15 @@ app.post("/login", async (req, res) => {
       { $set: { isLoggedOn: true, loginTimestamp: new Date() } },
     );
 
-    res.json({ token });
+    // ✅ Return token, username, and userType
+    res.json({
+      token,
+      username: user.username,
+      userType: user.userType,
+    });
   } catch (error) {
     console.error(error);
-    res.status(500).send("Login failed");
+    res.status(500).json({ message: "Login failed" });
   }
 });
 
@@ -529,6 +580,14 @@ app.post("/assign-student-housing", async (req, res) => {
       performedBy: req.body.performedBy || "admin",
     });
 
+    // ✅ CREATE NOTIFICATION
+    await createNotification(
+      student._id.toString(),
+      student.username,
+      "housing_assigned",
+      `You have been assigned to ${house} - Room ${roomNumber}`,
+    );
+
     res.json({ success: true, message: "Student assigned successfully" });
   } catch (error) {
     console.error(error);
@@ -618,6 +677,19 @@ app.post("/move-student-housing", async (req, res) => {
       performedBy: req.body.performedBy || "admin",
     });
 
+    // ✅ CREATE NOTIFICATION
+    const moveMessage =
+      currentHouse && currentRoom
+        ? `You have been moved from ${currentHouse} - Room ${currentRoom} to ${newHouse} - Room ${newRoom}`
+        : `You have been assigned to ${newHouse} - Room ${newRoom}`;
+
+    await createNotification(
+      student._id.toString(),
+      student.username,
+      "housing_moved",
+      moveMessage,
+    );
+
     res.json({ success: true, message: "Student moved successfully" });
   } catch (error) {
     console.error(error);
@@ -668,6 +740,14 @@ app.post("/deactivate-student-housing", async (req, res) => {
       timestamp: new Date(),
       performedBy: req.body.performedBy || "admin",
     });
+
+    // ✅ CREATE NOTIFICATION
+    await createNotification(
+      student._id.toString(),
+      student.username,
+      "housing_deactivated",
+      `Your housing assignment at ${house} - Room ${roomNumber} has been deactivated`,
+    );
 
     res.json({
       success: true,
@@ -928,6 +1008,21 @@ app.post("/add-rental-record", async (req, res) => {
       { studentId },
       { $set: { rentStatus: "Paid", lastPaymentDate: new Date() } },
     );
+
+    // ✅ CREATE NOTIFICATION
+    const student = await usersCollection.findOne({ studentId });
+    if (student) {
+      const monthName = new Date(month + "-01").toLocaleString("default", {
+        month: "long",
+        year: "numeric",
+      });
+      await createNotification(
+        student._id.toString(),
+        student.username,
+        "rent_payment",
+        `Your rent payment for ${monthName} has been recorded as ${status || "Paid"}`,
+      );
+    }
 
     res.json({ success: true, recordId: result.insertedId });
   } catch (error) {
@@ -1245,6 +1340,187 @@ app.get("/get-employee-timesheet/:username", async (req, res) => {
     res.json(enhancedRecords);
   } catch (error) {
     res.status(500).json({ error: "Failed to fetch timesheet" });
+  }
+});
+
+/* Check if student has paid for a specific month */
+app.get("/check-rental-status/:studentId/:month", async (req, res) => {
+  try {
+    const { studentId, month } = req.params;
+    const rentalRecordsCollection = db.collection("rental_records");
+
+    const record = await rentalRecordsCollection.findOne({
+      studentId,
+      month,
+    });
+
+    res.json({
+      hasPaid: !!record,
+      record: record || null,
+    });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: "Failed to check rental status" });
+  }
+});
+
+/* =========================
+   Facility Reports Routes
+========================= */
+
+app.post("/add-facility-report", upload.single("image"), async (req, res) => {
+  try {
+    const {
+      dorm,
+      facilityType,
+      title,
+      description,
+      discoveryDate,
+      reportedBy,
+      status,
+    } = req.body;
+
+    if (!dorm || !facilityType || !title || !discoveryDate || !reportedBy) {
+      return res.status(400).json({ message: "Missing required fields" });
+    }
+
+    const facilityReportsCollection = db.collection("facilities_reports");
+
+    // Generate facility report ID (e.g., FCR-2026-001)
+    const year = new Date().getFullYear();
+    const count = await facilityReportsCollection.countDocuments();
+    const facilityReportId = `FCR-${year}-${String(count + 1).padStart(3, "0")}`;
+
+    // Upload image to Cloudinary if provided
+    let imageUrl = null;
+    if (req.file) {
+      const result = await cloudinary.uploader.upload(req.file.path, {
+        folder: "facility_reports",
+      });
+      fs.unlinkSync(req.file.path);
+      imageUrl = result.secure_url;
+    }
+
+    const result = await facilityReportsCollection.insertOne({
+      facilityReportId,
+      dorm,
+      facilityType,
+      title,
+      description: description || "",
+      discoveryDate,
+      reportedBy,
+      imageUrl,
+      status: status || "Pending",
+      createdAt: new Date(),
+    });
+
+    res.json({ success: true, facilityReportId: result.insertedId });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: "Failed to add facility report" });
+  }
+});
+
+app.get("/get-facility-reports", async (req, res) => {
+  try {
+    const facilityReportsCollection = db.collection("facilities_reports");
+    const reports = await facilityReportsCollection
+      .find({})
+      .sort({ createdAt: -1 })
+      .toArray();
+
+    res.json(reports);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: "Failed to fetch facility reports" });
+  }
+});
+
+app.put("/update-facility-report-status", async (req, res) => {
+  try {
+    const { facilityReportId, status } = req.body;
+
+    if (!facilityReportId || !status) {
+      return res.status(400).json({ message: "Missing required fields" });
+    }
+
+    const facilityReportsCollection = db.collection("facilities_reports");
+
+    const result = await facilityReportsCollection.updateOne(
+      { _id: new ObjectId(facilityReportId) },
+      { $set: { status, updatedAt: new Date() } },
+    );
+
+    if (result.matchedCount === 0) {
+      return res.status(404).json({ message: "Facility report not found" });
+    }
+
+    res.json({ success: true, message: "Status updated successfully" });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: "Failed to update status" });
+  }
+});
+
+/* =========================
+   User Notifications Routes
+========================= */
+
+// Helper function to create a notification
+async function createNotification(userId, username, notificationType, message) {
+  try {
+    const notificationsCollection = db.collection("user_notifications");
+
+    await notificationsCollection.insertOne({
+      userId,
+      username,
+      notificationType,
+      message,
+      timestamp: new Date(),
+      read: false,
+    });
+  } catch (error) {
+    console.error("Error creating notification:", error);
+  }
+}
+
+// Get notifications for a user
+app.get("/get-notifications/:username", async (req, res) => {
+  try {
+    const { username } = req.params;
+    const notificationsCollection = db.collection("user_notifications");
+
+    const notifications = await notificationsCollection
+      .find({ username })
+      .sort({ timestamp: -1 })
+      .toArray();
+
+    res.json(notifications);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: "Failed to fetch notifications" });
+  }
+});
+
+// Mark notification as read
+app.put("/mark-notification-read/:notificationId", async (req, res) => {
+  try {
+    const { notificationId } = req.params;
+    const notificationsCollection = db.collection("user_notifications");
+
+    const result = await notificationsCollection.updateOne(
+      { _id: new ObjectId(notificationId) },
+      { $set: { read: true } },
+    );
+
+    if (result.matchedCount === 0) {
+      return res.status(404).json({ message: "Notification not found" });
+    }
+
+    res.json({ success: true });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: "Failed to update notification" });
   }
 });
 
