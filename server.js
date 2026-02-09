@@ -88,7 +88,7 @@ async function startServer() {
 
     await client.connect();
 
-    db = client.db("nursing-school-prod");
+    db = client.db("nursing-school");
     usersCollection = db.collection("users");
 
     // await seedHousingCollection();
@@ -106,7 +106,7 @@ async function startServer() {
 
 async function connectDB() {
   await client.connect();
-  db = client.db("nursing-school-prod");
+  db = client.db("nursing-school");
   usersCollection = db.collection("users");
   console.log("✅ Connected to MongoDB");
 }
@@ -1533,3 +1533,4 @@ app.put("/mark-notification-read/:notificationId", async (req, res) => {
 // });
 
 startServer();
+
