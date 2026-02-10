@@ -1525,6 +1525,72 @@ app.put("/mark-notification-read/:notificationId", async (req, res) => {
 });
 
 /* =========================
+   Password Reset Route
+========================= */
+
+app.post("/reset-password", async (req, res) => {
+  try {
+    const { staffId, email, position, newPassword, confirmPassword } = req.body;
+
+    // Validate required fields
+    if (!staffId || !email || !position || !newPassword || !confirmPassword) {
+      return res.status(400).json({ message: "All fields are required" });
+    }
+
+    // Check if passwords match
+    if (newPassword !== confirmPassword) {
+      return res.status(400).json({ message: "Passwords do not match" });
+    }
+
+    // Validate password length
+    if (newPassword.length < 6) {
+      return res.status(400).json({ message: "Password must be at least 6 characters long" });
+    }
+
+    // Find user with matching credentials
+    const user = await usersCollection.findOne({
+      staffId: staffId,
+      email: email,
+      position: position
+    });
+
+    // Check if user exists with matching credentials
+    if (!user) {
+      return res.status(404).json({ 
+        message: "Invalid credentials. Please verify your Staff ID, Email, and Position." 
+      });
+    }
+
+    // Hash the new password
+    const hashedPassword = await encryptPassword(newPassword);
+
+    // Update the password
+    const result = await usersCollection.updateOne(
+      { _id: user._id },
+      { 
+        $set: { 
+          hashedPassword: hashedPassword,
+          passwordUpdatedAt: new Date()
+        } 
+      }
+    );
+
+    if (result.modifiedCount === 0) {
+      return res.status(500).json({ message: "Failed to update password" });
+    }
+
+    res.json({ 
+      success: true, 
+      message: "Password reset successfully" 
+    });
+
+  } catch (error) {
+    console.error("Password reset error:", error);
+    res.status(500).json({ message: "Password reset failed" });
+  }
+});
+
+/* =========================
    Server
 ========================= */
 
@@ -1533,3 +1599,4 @@ app.put("/mark-notification-read/:notificationId", async (req, res) => {
 // });
 
 startServer();
+
