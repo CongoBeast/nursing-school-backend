@@ -1525,6 +1525,215 @@ app.put("/mark-notification-read/:notificationId", async (req, res) => {
 });
 
 /* =========================
+   Maintenance Notices Routes
+========================= */
+
+// Add a new maintenance notice (from fault report)
+app.post("/add-maintenance-notice", async (req, res) => {
+  try {
+    const {
+      faultReportId,
+      house,
+      roomNumber,
+      title,
+      plannedDate,
+      status,
+      notes,
+      reportedBy,
+    } = req.body;
+
+    if (!house || !title || !plannedDate || !reportedBy) {
+      return res.status(400).json({ message: "Missing required fields" });
+    }
+
+    const maintenanceNoticesCollection = db.collection("maintenance_notices");
+
+    // Generate maintenance notice ID (e.g., MN-2026-001)
+    const year = new Date().getFullYear();
+    const count = await maintenanceNoticesCollection.countDocuments();
+    const maintenanceNoticeId = `MN-${year}-${String(count + 1).padStart(3, "0")}`;
+
+    // Calculate initial progress based on status
+    let progress = 0;
+    if (status === "In Progress") progress = 50;
+    if (status === "Urgent") progress = 25;
+    if (status === "Awaiting Parts") progress = 30;
+    if (status === "Completed") progress = 100;
+
+    const result = await maintenanceNoticesCollection.insertOne({
+      maintenanceNoticeId,
+      faultReportId: faultReportId || null,
+      title,
+      house,
+      roomNumber: roomNumber || null,
+      location: roomNumber ? `${house} - ${roomNumber}` : house,
+      plannedDate,
+      scheduledDate: plannedDate,
+      completedDate: status === "Completed" ? new Date() : null,
+      notes: notes || "",
+      description: notes || "",
+      status: status || "Scheduled",
+      progress,
+      assignedTo: "Maintenance Team",
+      reportedBy,
+      createdAt: new Date(),
+    });
+
+    // If linked to a fault report, update the fault report status
+    if (faultReportId) {
+      const faultReportsCollection = db.collection("fault_reports");
+      await faultReportsCollection.updateOne(
+        { _id: new ObjectId(faultReportId) },
+        { 
+          $set: { 
+            status: "In Progress",
+            maintenanceNoticeId: maintenanceNoticeId,
+            updatedAt: new Date() 
+          } 
+        }
+      );
+    }
+
+    res.json({ 
+      success: true, 
+      maintenanceNoticeId: result.insertedId,
+      message: "Maintenance notice created successfully" 
+    });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: "Failed to add maintenance notice" });
+  }
+});
+
+// Get all maintenance notices
+app.get("/get-maintenance-notices", async (req, res) => {
+  try {
+    const maintenanceNoticesCollection = db.collection("maintenance_notices");
+    const notices = await maintenanceNoticesCollection
+      .find({})
+      .sort({ createdAt: -1 })
+      .toArray();
+
+    res.json(notices);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: "Failed to fetch maintenance notices" });
+  }
+});
+
+// Update maintenance notice status and progress
+app.put("/update-maintenance-notice-status", async (req, res) => {
+  try {
+    const { maintenanceNoticeId, status, progress, notes } = req.body;
+
+    if (!maintenanceNoticeId || !status) {
+      return res.status(400).json({ message: "Missing required fields" });
+    }
+
+    const maintenanceNoticesCollection = db.collection("maintenance_notices");
+
+    const updateData = {
+      status,
+      updatedAt: new Date(),
+    };
+
+    // Update progress if provided, otherwise auto-calculate
+    if (progress !== undefined) {
+      updateData.progress = progress;
+    } else {
+      if (status === "Scheduled") updateData.progress = 0;
+      if (status === "Urgent") updateData.progress = 25;
+      if (status === "Awaiting Parts") updateData.progress = 30;
+      if (status === "In Progress") updateData.progress = 50;
+      if (status === "Completed") updateData.progress = 100;
+    }
+
+    // Update notes if provided
+    if (notes) {
+      updateData.notes = notes;
+      updateData.description = notes;
+    }
+
+    // Set completed date if status is Completed
+    if (status === "Completed") {
+      updateData.completedDate = new Date();
+    }
+
+    const result = await maintenanceNoticesCollection.updateOne(
+      { _id: new ObjectId(maintenanceNoticeId) },
+      { $set: updateData }
+    );
+
+    if (result.matchedCount === 0) {
+      return res.status(404).json({ message: "Maintenance notice not found" });
+    }
+
+    // If completed, also update the linked fault report if exists
+    if (status === "Completed") {
+      const notice = await maintenanceNoticesCollection.findOne({ 
+        _id: new ObjectId(maintenanceNoticeId) 
+      });
+      
+      if (notice.faultReportId) {
+        const faultReportsCollection = db.collection("fault_reports");
+        await faultReportsCollection.updateOne(
+          { _id: new ObjectId(notice.faultReportId) },
+          { $set: { status: "Fixed", updatedAt: new Date() } }
+        );
+      }
+    }
+
+    res.json({ success: true, message: "Status updated successfully" });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: "Failed to update status" });
+  }
+});
+
+// Get a single maintenance notice by ID
+app.get("/get-maintenance-notice/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    if (!ObjectId.isValid(id)) {
+      return res.status(400).json({ error: "Invalid ID format" });
+    }
+
+    const maintenanceNoticesCollection = db.collection("maintenance_notices");
+    const notice = await maintenanceNoticesCollection.findOne({ 
+      _id: new ObjectId(id) 
+    });
+
+    if (!notice) {
+      return res.status(404).json({ error: "Maintenance notice not found" });
+    }
+
+    res.json(notice);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: "Failed to fetch maintenance notice" });
+  }
+});
+
+// Get maintenance notices for a specific fault report
+app.get("/get-maintenance-notices-by-fault/:faultReportId", async (req, res) => {
+  try {
+    const { faultReportId } = req.params;
+
+    const maintenanceNoticesCollection = db.collection("maintenance_notices");
+    const notices = await maintenanceNoticesCollection
+      .find({ faultReportId })
+      .sort({ createdAt: -1 })
+      .toArray();
+
+    res.json(notices);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: "Failed to fetch maintenance notices" });
+  }
+});
+
+/* =========================
    Server
 ========================= */
 
@@ -1533,4 +1742,5 @@ app.put("/mark-notification-read/:notificationId", async (req, res) => {
 // });
 
 startServer();
+
 
