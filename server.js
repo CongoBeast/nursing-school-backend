@@ -8,48 +8,32 @@ const multer = require("multer");
 const { v2: cloudinary } = require("cloudinary");
 const dotenv = require("dotenv");
 const fs = require("fs");
+const nodemailer = require("nodemailer");
 
 const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
 
 dotenv.config();
 
-const app = express();
-const PORT = 5000;
-const JWT_SECRET = "your_jwt_secret";
+const transporter = nodemailer.createTransport({
+  host: "smtp.gmail.com",
+  port: 587,
+  secure: false,
+  requireTLS: true,
+  auth: {
+    user: process.env.EMAIL_USER,
+    pass: process.env.EMAIL_PASS,
+  },
+});
 
-console.log("is this working ?");
+const app = express();
+const PORT = process.env.PORT || 5000;
+const JWT_SECRET = process.env.JWT_SECRET || "your_jwt_secret";
+
+console.log("updating to prod database");
 
 app.use(express.json());
 app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }));
-
-const { MailtrapClient } = require("mailtrap");
-
-const TOKEN = "f7a7fd52c5c1f3c5ac232ceaf4536227";
-
-const mailClient = new MailtrapClient({
-  token: TOKEN,
-});
-
-const sender = {
-  email: "hello@demomailtrap.co",
-  name: "Mailtrap Test",
-};
-const recipients = [
-  {
-    email: "thomasmethembe43@gmail.com",
-  },
-];
-
-mailClient
-  .send({
-    from: sender,
-    to: recipients,
-    subject: "You are awesome!",
-    text: "Congrats for sending test email with Mailtrap!",
-    category: "Integration Test",
-  })
-  .then(console.log, console.error);
 
 const corsOptions = {
   origin: true, // reflect request origin
@@ -64,12 +48,15 @@ app.options("*", cors(corsOptions));
 
 app.set("trust proxy", 1);
 
+app.get("/", (req, res) => {
+  res.json({ status: "ok", message: "Nursing School API is running" });
+});
+
 /* =========================
    MongoDB Connection
 ========================= */
 
-const uri =
-  "mongodb+srv://congo43:4596manu@cluster0.2vjumfn.mongodb.net/?appName=Cluster0";
+const uri = process.env.MONGODB_URI;
 
 const client = new MongoClient(uri, {
   serverApi: {
@@ -91,11 +78,11 @@ async function startServer() {
     db = client.db("nursing-school-prod");
     usersCollection = db.collection("users");
 
-    // await seedHousingCollection();
+    await seedHousingCollection();
 
     console.log("✅ MongoDB connected");
 
-    app.listen(PORT, () => {
+    app.listen(PORT, "0.0.0.0", () => {
       console.log(`🚀 Server running on port ${PORT}`);
     });
   } catch (err) {
@@ -104,61 +91,53 @@ async function startServer() {
   }
 }
 
-async function connectDB() {
-  await client.connect();
-  db = client.db("nursing-school-prod");
-  usersCollection = db.collection("users");
-  console.log("✅ Connected to MongoDB");
-}
-
-connectDB().catch(console.error);
-
 /* =========================
    Database Seeding Utility
 ========================= */
 
-// async function seedHousingCollection() {
-//   try {
-//     const housingCollection = db.collection('housing');
+async function seedHousingCollection() {
+  try {
+    const housingCollection = db.collection("housing");
 
-//     // Check if data already exists to avoid duplicates
-//     const count = await housingCollection.countDocuments();
-//     if (count > 0) {
-//       console.log('ℹ️ Housing collection already populated. Skipping seed.');
-//       return;
-//     }
+    // Check if data already exists to avoid duplicates
+    const count = await housingCollection.countDocuments();
+    if (count > 0) {
+      console.log("ℹ️ Housing collection already populated. Skipping seed.");
+      return;
+    }
 
-//     const rooms = [];
+    const rooms = [];
 
-//     // Generate Adlam House Rooms (119)
-//     for (let i = 1; i <= 119; i++) {
-//       rooms.push({
-//         house: 'Adlam House',
-//         roomNumber: `A${i.toString().padStart(2, '0')}`, // e.g., A01, A119
-//         residents: [],
-//         fault_reports: [],
-//         status: 'available'
-//       });
-//     }
+    // Generate Adlam House Rooms (119)
+    for (let i = 1; i <= 119; i++) {
+      rooms.push({
+        house: "Adlam House",
+        roomNumber: `A${i.toString().padStart(2, "0")}`, // e.g., A01, A119
+        residents: [],
+        fault_reports: [],
+        status: "available",
+      });
+    }
 
-//     // Generate Nurse Home Rooms (122)
-//     for (let i = 1; i <= 122; i++) {
-//       rooms.push({
-//         house: 'Nurse Home',
-//         roomNumber: `N${i.toString().padStart(2, '0')}`, // e.g., N01, N122
-//         residents: [],
-//         fault_reports: [],
-//         status: 'available'
-//       });
-//     }
+    // Generate Nurse Home Rooms (122)
+    for (let i = 1; i <= 122; i++) {
+      rooms.push({
+        house: "Nurse Home",
+        roomNumber: `N${i.toString().padStart(2, "0")}`, // e.g., N01, N122
+        residents: [],
+        fault_reports: [],
+        status: "available",
+      });
+    }
 
-//     const result = await housingCollection.insertMany(rooms);
-//     console.log(`✅ Successfully seeded housing collection with ${result.insertedCount} rooms.`);
-
-//   } catch (error) {
-//     console.error('❌ Error seeding housing collection:', error);
-//   }
-// }
+    const result = await housingCollection.insertMany(rooms);
+    console.log(
+      `✅ Successfully seeded housing collection with ${result.insertedCount} rooms.`,
+    );
+  } catch (error) {
+    console.error("❌ Error seeding housing collection:", error);
+  }
+}
 
 /* =========================
    Utilities
@@ -182,15 +161,14 @@ const generateId = () => {
 ========================= */
 
 cloudinary.config({
-  cloud_name: "dxxlrzouc",
-  api_key: "191187614991536",
-  api_secret: "9b75q3SXcar-yJFsWQsfXWFhnM8",
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+  api_key: process.env.CLOUDINARY_API_KEY,
+  api_secret: process.env.CLOUDINARY_API_SECRET,
 });
 
 /* =========================
    Auth Routes
 ========================= */
-
 app.post("/register", async (req, res) => {
   try {
     const { username, email, password, confirmPassword, ...rest } = req.body;
@@ -219,22 +197,15 @@ app.post("/register", async (req, res) => {
     });
 
     // ✅ Create welcome notification
-    // await createNotification(
-    //   result.insertedId.toString(),
-    //   username,
-    //   "account_created",
-    //   "Your account has been successfully created"
-    // );
+    await createNotification(
+      result.insertedId.toString(),
+      username,
+      "account_created",
+      "Your account has been successfully created",
+    );
 
-    const notificationsCollection = db.collection("user_notifications");
-    await notificationsCollection.insertOne({
-      userId: result.insertedId.toString(),
-      username: username,
-      notificationType: "signup",
-      message: `Dear ${username}, thank you for signing up`,
-      timestamp: new Date(),
-      read: false,
-    });
+    // ✅ Send welcome email
+    await sendWelcomeEmail(email, username);
 
     const token = generateToken(result.insertedId.toString());
     res.json({ token });
@@ -263,11 +234,14 @@ app.post("/login", async (req, res) => {
       { $set: { isLoggedOn: true, loginTimestamp: new Date() } },
     );
 
+    console.log(user);
+
     // ✅ Return token, username, and userType
     res.json({
       token,
       username: user.username,
       userType: user.userType,
+      userId: user.staffId || user.studentId || null,
     });
   } catch (error) {
     console.error(error);
@@ -317,6 +291,64 @@ app.get("/get-notices", async (req, res) => {
   } catch (error) {
     console.error(error);
     res.status(500).json({ message: "Failed to fetch notices" });
+  }
+});
+
+app.delete("/delete-notice/:noticeId", async (req, res) => {
+  try {
+    const { noticeId } = req.params;
+    const noticesCollection = db.collection("notices");
+
+    const result = await noticesCollection.deleteOne({
+      _id: new ObjectId(noticeId),
+    });
+
+    if (result.deletedCount === 0) {
+      return res.status(404).json({ message: "Notice not found" });
+    }
+
+    res.json({ success: true, message: "Notice deleted successfully" });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: "Failed to delete notice" });
+  }
+});
+
+app.put("/update-notice/:noticeId", async (req, res) => {
+  try {
+    const { noticeId } = req.params;
+    const { title, content, priority, date } = req.body;
+
+    if (!title || !content || !date) {
+      return res.status(400).json({ message: "Missing required fields" });
+    }
+
+    const noticesCollection = db.collection("notices");
+
+    const result = await noticesCollection.updateOne(
+      { _id: new ObjectId(noticeId) },
+      {
+        $set: {
+          title,
+          content,
+          priority: priority || "medium",
+          date,
+          updatedAt: new Date(),
+        },
+      },
+    );
+
+    if (result.matchedCount === 0) {
+      return res.status(404).json({ message: "Notice not found" });
+    }
+
+    res.json({
+      success: true,
+      message: "Notice updated successfully",
+    });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: "Failed to update notice" });
   }
 });
 
@@ -371,25 +403,93 @@ app.get("/get-events", async (req, res) => {
   }
 });
 
+app.delete("/delete-event/:eventId", async (req, res) => {
+  try {
+    const { eventId } = req.params;
+    const eventsCollection = db.collection("events");
+
+    const result = await eventsCollection.deleteOne({
+      _id: new ObjectId(eventId),
+    });
+
+    if (result.deletedCount === 0) {
+      return res.status(404).json({ message: "Event not found" });
+    }
+
+    res.json({ success: true, message: "Event deleted successfully" });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: "Failed to delete event" });
+  }
+});
+
+app.put("/update-event/:eventId", async (req, res) => {
+  try {
+    const { eventId } = req.params;
+    const { title, datetime, location } = req.body;
+
+    if (!title || !datetime || !location) {
+      return res.status(400).json({ message: "Missing required fields" });
+    }
+
+    const eventsCollection = db.collection("events");
+
+    // Extract date and time from datetime
+    const eventDate = new Date(datetime);
+    const date = eventDate.toISOString().split("T")[0];
+    const time = eventDate.toLocaleTimeString("en-US", {
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: true,
+    });
+
+    const result = await eventsCollection.updateOne(
+      { _id: new ObjectId(eventId) },
+      {
+        $set: {
+          title,
+          date,
+          time,
+          location,
+          updatedAt: new Date(),
+        },
+      },
+    );
+
+    if (result.matchedCount === 0) {
+      return res.status(404).json({ message: "Event not found" });
+    }
+
+    res.json({
+      success: true,
+      message: "Event updated successfully",
+    });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: "Failed to update event" });
+  }
+});
+
 /* =========================
    User Management
 ========================= */
 
-app.get("/get-user/:username", async (req, res) => {
+app.get("/get-user/:id", async (req, res) => {
   try {
-    const { username } = req.params;
+    const { id } = req.params;
 
-    if (!username) {
-      return res.status(400).json({ error: "Username required" });
+    if (!id) {
+      return res.status(400).json({ error: "ID required" });
     }
 
-    const user = await usersCollection.findOne({ username });
+    const user = await usersCollection.findOne({
+      $or: [{ studentId: id }, { staffId: id }],
+    });
 
     if (!user) {
       return res.status(404).json({ error: "User not found" });
     }
 
-    // Don't send the hashed password to the frontend
     const { hashedPassword, ...userWithoutPassword } = user;
 
     res.json(userWithoutPassword);
@@ -400,25 +500,26 @@ app.get("/get-user/:username", async (req, res) => {
 });
 
 // Optional: Update user profile
-app.put("/update-user/:username", async (req, res) => {
+app.put("/update-user/:id", async (req, res) => {
   try {
-    const { username } = req.params;
-    const { email, phone, address, photo } = req.body;
+    const { id } = req.params;
+    const { email, phone, address, photo, username } = req.body;
 
-    if (!username) {
-      return res.status(400).json({ error: "Username required" });
+    if (!id) {
+      return res.status(400).json({ error: "ID required" });
     }
 
     const updateData = {};
     if (email) updateData.email = email;
     if (phone) updateData.phone = phone;
+    if (username) updateData.username = username;
     if (address) updateData.address = address;
     if (photo) updateData.photo = photo;
 
     updateData.lastUpdated = new Date();
 
     const result = await usersCollection.updateOne(
-      { username },
+      { $or: [{ studentId: id }, { staffId: id }] },
       { $set: updateData },
     );
 
@@ -580,13 +681,18 @@ app.post("/assign-student-housing", async (req, res) => {
       performedBy: req.body.performedBy || "admin",
     });
 
-    // ✅ CREATE NOTIFICATION
-    await createNotification(
-      student._id.toString(),
-      student.username,
-      "housing_assigned",
-      `You have been assigned to ${house} - Room ${roomNumber}`,
-    );
+    if (student.email) {
+      await sendHousingEmail(student.email, student.username, "assigned", {
+        House: house,
+        "Room Number": roomNumber,
+        "Date Assigned": new Date().toLocaleDateString("en-US", {
+          year: "numeric",
+          month: "long",
+          day: "numeric",
+        }),
+        Status: "Active",
+      });
+    }
 
     res.json({ success: true, message: "Student assigned successfully" });
   } catch (error) {
@@ -677,18 +783,19 @@ app.post("/move-student-housing", async (req, res) => {
       performedBy: req.body.performedBy || "admin",
     });
 
-    // ✅ CREATE NOTIFICATION
-    const moveMessage =
-      currentHouse && currentRoom
-        ? `You have been moved from ${currentHouse} - Room ${currentRoom} to ${newHouse} - Room ${newRoom}`
-        : `You have been assigned to ${newHouse} - Room ${newRoom}`;
-
-    await createNotification(
-      student._id.toString(),
-      student.username,
-      "housing_moved",
-      moveMessage,
-    );
+    if (student.email) {
+      await sendHousingEmail(student.email, student.username, "moved", {
+        "Previous House": currentHouse || "N/A",
+        "Previous Room": currentRoom || "N/A",
+        "New House": newHouse,
+        "New Room": newRoom,
+        "Date Moved": new Date().toLocaleDateString("en-US", {
+          year: "numeric",
+          month: "long",
+          day: "numeric",
+        }),
+      });
+    }
 
     res.json({ success: true, message: "Student moved successfully" });
   } catch (error) {
@@ -741,13 +848,18 @@ app.post("/deactivate-student-housing", async (req, res) => {
       performedBy: req.body.performedBy || "admin",
     });
 
-    // ✅ CREATE NOTIFICATION
-    await createNotification(
-      student._id.toString(),
-      student.username,
-      "housing_deactivated",
-      `Your housing assignment at ${house} - Room ${roomNumber} has been deactivated`,
-    );
+    if (student.email) {
+      await sendHousingEmail(student.email, student.username, "deactivated", {
+        House: house,
+        "Room Number": roomNumber,
+        "Date Deactivated": new Date().toLocaleDateString("en-US", {
+          year: "numeric",
+          month: "long",
+          day: "numeric",
+        }),
+        Status: "Deactivated",
+      });
+    }
 
     res.json({
       success: true,
@@ -872,6 +984,21 @@ app.post("/add-fault-report", upload.single("image"), async (req, res) => {
       status: "Pending",
       createdAt: new Date(),
     });
+
+    // ✅ Send notification email
+    await sendReportNotificationEmail(
+      "fault",
+      {
+        faultReportId,
+        house,
+        roomNumber,
+        item,
+        details,
+        discoveryDate,
+        reportedBy,
+      },
+      imageUrl,
+    );
 
     res.json({ success: true, faultReportId: result.insertedId });
   } catch (error) {
@@ -1008,21 +1135,6 @@ app.post("/add-rental-record", async (req, res) => {
       { studentId },
       { $set: { rentStatus: "Paid", lastPaymentDate: new Date() } },
     );
-
-    // ✅ CREATE NOTIFICATION
-    const student = await usersCollection.findOne({ studentId });
-    if (student) {
-      const monthName = new Date(month + "-01").toLocaleString("default", {
-        month: "long",
-        year: "numeric",
-      });
-      await createNotification(
-        student._id.toString(),
-        student.username,
-        "rent_payment",
-        `Your rent payment for ${monthName} has been recorded as ${status || "Paid"}`,
-      );
-    }
 
     res.json({ success: true, recordId: result.insertedId });
   } catch (error) {
@@ -1414,6 +1526,22 @@ app.post("/add-facility-report", upload.single("image"), async (req, res) => {
       createdAt: new Date(),
     });
 
+    // ✅ Send notification email
+    await sendReportNotificationEmail(
+      "facility",
+      {
+        facilityReportId,
+        dorm,
+        facilityType,
+        title,
+        description,
+        discoveryDate,
+        reportedBy,
+        status,
+      },
+      imageUrl,
+    );
+
     res.json({ success: true, facilityReportId: result.insertedId });
   } catch (error) {
     console.error(error);
@@ -1525,15 +1653,248 @@ app.put("/mark-notification-read/:notificationId", async (req, res) => {
 });
 
 /* =========================
+   Maintenance Notices Routes
+========================= */
+
+// Add a new maintenance notice (from fault report)
+app.post("/add-maintenance-notice", async (req, res) => {
+  try {
+    console.log("Received maintenance notice data:", JSON.stringify(req.body));
+
+    const houseName = req.body.houseName || req.body.house;
+    const problemTitle = req.body.problemTitle || req.body.title;
+    const maintenanceDate = req.body.maintenanceDate || req.body.plannedDate;
+    const reportedBy = req.body.reportedBy;
+    const reportId = req.body.reportId || req.body.faultReportId;
+    // const roomNumber = req.body.roomNumber;
+    const status = req.body.status;
+    const additionalNotes = req.body.additionalNotes || req.body.notes;
+
+    if (!houseName || !problemTitle || !maintenanceDate || !reportedBy) {
+      console.log(
+        "Missing fields - houseName:",
+        houseName,
+        "problemTitle:",
+        problemTitle,
+        "maintenanceDate:",
+        maintenanceDate,
+        "reportedBy:",
+        reportedBy,
+      );
+      return res.status(400).json({
+        message: "Missing required fields",
+        missing: {
+          houseName: !houseName,
+          problemTitle: !problemTitle,
+          maintenanceDate: !maintenanceDate,
+          reportedBy: !reportedBy,
+        },
+      });
+    }
+
+    const maintenanceNoticesCollection = db.collection("maintenance_notices");
+
+    // Generate maintenance notice ID (e.g., MN-2026-001)
+    const year = new Date().getFullYear();
+    const count = await maintenanceNoticesCollection.countDocuments();
+    const maintenanceNoticeId = `MN-${year}-${String(count + 1).padStart(3, "0")}`;
+
+    // Calculate initial progress based on status
+    let progress = 0;
+    if (status === "In Progress") progress = 50;
+    if (status === "Urgent") progress = 25;
+    if (status === "Awaiting Parts") progress = 30;
+    if (status === "Completed") progress = 100;
+
+    const result = await maintenanceNoticesCollection.insertOne({
+      maintenanceNoticeId,
+      faultReportId: reportId || null, // Using reportId
+      title: problemTitle, // Using problemTitle
+      house: houseName, // Using houseName
+      // roomNumber: roomNumber || null,
+      // location: roomNumber ? `${houseName} - ${roomNumber}` : houseName,
+      plannedDate: maintenanceDate, // Using maintenanceDate
+      scheduledDate: maintenanceDate, // Using maintenanceDate
+      completedDate: status === "Completed" ? new Date() : null,
+      notes: additionalNotes || "", // Using additionalNotes
+      description: additionalNotes || "", // Using additionalNotes
+      status: status || "Scheduled",
+      progress,
+      assignedTo: "Maintenance Team",
+      reportedBy,
+      createdAt: new Date(),
+    });
+
+    // If linked to a fault report, update the fault report status
+    if (reportId) {
+      // Using reportId
+      const faultReportsCollection = db.collection("fault_reports");
+      await faultReportsCollection.updateOne(
+        { _id: new ObjectId(reportId) }, // Using reportId
+        {
+          $set: {
+            status: "In Progress",
+            maintenanceNoticeId: maintenanceNoticeId,
+            updatedAt: new Date(),
+          },
+        },
+      );
+    }
+
+    res.json({
+      success: true,
+      maintenanceNoticeId: result.insertedId,
+      message: "Maintenance notice created successfully",
+    });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: "Failed to add maintenance notice" });
+  }
+});
+
+// Get all maintenance notices
+app.get("/get-maintenance-notices", async (req, res) => {
+  try {
+    const maintenanceNoticesCollection = db.collection("maintenance_notices");
+    const notices = await maintenanceNoticesCollection
+      .find({})
+      .sort({ createdAt: -1 })
+      .toArray();
+
+    res.json(notices);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: "Failed to fetch maintenance notices" });
+  }
+});
+
+// Update maintenance notice status and progress
+app.put("/update-maintenance-notice-status", async (req, res) => {
+  try {
+    const { maintenanceNoticeId, status, progress, notes } = req.body;
+
+    if (!maintenanceNoticeId || !status) {
+      return res.status(400).json({ message: "Missing required fields" });
+    }
+
+    const maintenanceNoticesCollection = db.collection("maintenance_notices");
+
+    const updateData = {
+      status,
+      updatedAt: new Date(),
+    };
+
+    // Update progress if provided, otherwise auto-calculate
+    if (progress !== undefined) {
+      updateData.progress = progress;
+    } else {
+      if (status === "Scheduled") updateData.progress = 0;
+      if (status === "Urgent") updateData.progress = 25;
+      if (status === "Awaiting Parts") updateData.progress = 30;
+      if (status === "In Progress") updateData.progress = 50;
+      if (status === "Completed") updateData.progress = 100;
+    }
+
+    // Update notes if provided
+    if (notes) {
+      updateData.notes = notes;
+      updateData.description = notes;
+    }
+
+    // Set completed date if status is Completed
+    if (status === "Completed") {
+      updateData.completedDate = new Date();
+    }
+
+    const result = await maintenanceNoticesCollection.updateOne(
+      { _id: new ObjectId(maintenanceNoticeId) },
+      { $set: updateData },
+    );
+
+    if (result.matchedCount === 0) {
+      return res.status(404).json({ message: "Maintenance notice not found" });
+    }
+
+    // If completed, also update the linked fault report if exists
+    if (status === "Completed") {
+      const notice = await maintenanceNoticesCollection.findOne({
+        _id: new ObjectId(maintenanceNoticeId),
+      });
+
+      if (notice.faultReportId) {
+        const faultReportsCollection = db.collection("fault_reports");
+        await faultReportsCollection.updateOne(
+          { _id: new ObjectId(notice.faultReportId) },
+          { $set: { status: "Fixed", updatedAt: new Date() } },
+        );
+      }
+    }
+
+    res.json({ success: true, message: "Status updated successfully" });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: "Failed to update status" });
+  }
+});
+
+// Get a single maintenance notice by ID
+app.get("/get-maintenance-notice/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    if (!ObjectId.isValid(id)) {
+      return res.status(400).json({ error: "Invalid ID format" });
+    }
+
+    const maintenanceNoticesCollection = db.collection("maintenance_notices");
+    const notice = await maintenanceNoticesCollection.findOne({
+      _id: new ObjectId(id),
+    });
+
+    if (!notice) {
+      return res.status(404).json({ error: "Maintenance notice not found" });
+    }
+
+    res.json(notice);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: "Failed to fetch maintenance notice" });
+  }
+});
+
+// Get maintenance notices for a specific fault report
+app.get(
+  "/get-maintenance-notices-by-fault/:faultReportId",
+  async (req, res) => {
+    try {
+      const { faultReportId } = req.params;
+
+      const maintenanceNoticesCollection = db.collection("maintenance_notices");
+      const notices = await maintenanceNoticesCollection
+        .find({ faultReportId })
+        .sort({ createdAt: -1 })
+        .toArray();
+
+      res.json(notices);
+    } catch (error) {
+      console.error(error);
+      res.status(500).json({ message: "Failed to fetch maintenance notices" });
+    }
+  },
+);
+
+/* =========================
    Password Reset Route
 ========================= */
 
 app.post("/reset-password", async (req, res) => {
+  console.log("Password reset request received");
+
   try {
-    const { staffId, email, position, newPassword, confirmPassword } = req.body;
+    const { id, email, newPassword, confirmPassword } = req.body;
 
     // Validate required fields
-    if (!staffId || !email || !position || !newPassword || !confirmPassword) {
+    if (!id || !email || !newPassword || !confirmPassword) {
       return res.status(400).json({ message: "All fields are required" });
     }
 
@@ -1544,20 +1905,21 @@ app.post("/reset-password", async (req, res) => {
 
     // Validate password length
     if (newPassword.length < 6) {
-      return res.status(400).json({ message: "Password must be at least 6 characters long" });
+      return res
+        .status(400)
+        .json({ message: "Password must be at least 6 characters long" });
     }
 
     // Find user with matching credentials
     const user = await usersCollection.findOne({
-      staffId: staffId,
+      $or: [{ staffId: id }, { studentId: id }],
       email: email,
-      position: position
     });
 
     // Check if user exists with matching credentials
     if (!user) {
-      return res.status(404).json({ 
-        message: "Invalid credentials. Please verify your Staff ID, Email, and Position." 
+      return res.status(404).json({
+        message: "Invalid credentials. Please verify your ID and Email.",
       });
     }
 
@@ -1567,27 +1929,725 @@ app.post("/reset-password", async (req, res) => {
     // Update the password
     const result = await usersCollection.updateOne(
       { _id: user._id },
-      { 
-        $set: { 
+      {
+        $set: {
           hashedPassword: hashedPassword,
-          passwordUpdatedAt: new Date()
-        } 
-      }
+          passwordUpdatedAt: new Date(),
+        },
+      },
     );
 
     if (result.modifiedCount === 0) {
       return res.status(500).json({ message: "Failed to update password" });
     }
 
-    res.json({ 
-      success: true, 
-      message: "Password reset successfully" 
-    });
+    // ✅ Send password reset confirmation email
+    await sendPasswordResetEmail(user.email, user.username);
 
+    res.json({
+      success: true,
+      message: "Password reset successfully",
+      username: user.username,
+      userType: user.userType,
+      userId: user.staffId || user.studentId || null,
+    });
   } catch (error) {
     console.error("Password reset error:", error);
     res.status(500).json({ message: "Password reset failed" });
   }
+});
+
+/* =========================
+    staff requests
+  ==========================
+  */
+app.post("/add-staff-request", async (req, res) => {
+  try {
+    const { username, type, description } = req.body;
+
+    if (!username || !type || !description) {
+      return res.status(400).json({ message: "Missing required fields" });
+    }
+
+    const staffRequestsCollection = db.collection("staff_requests");
+
+    const result = await staffRequestsCollection.insertOne({
+      username,
+      type,
+      description,
+      status: "Pending",
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      statusUpdatedBy: null,
+      statusUpdatedAt: null,
+    });
+
+    res.json({
+      success: true,
+      requestId: result.insertedId,
+      message: "Request submitted successfully",
+    });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: "Failed to submit request" });
+  }
+});
+
+app.get("/get-staff-requests/:username", async (req, res) => {
+  try {
+    const { username } = req.params;
+
+    if (!username) {
+      return res.status(400).json({ message: "Username required" });
+    }
+
+    const staffRequestsCollection = db.collection("staff_requests");
+
+    const requests = await staffRequestsCollection
+      .find({ username })
+      .sort({ createdAt: -1 })
+      .toArray();
+
+    res.json(requests);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: "Failed to fetch requests" });
+  }
+});
+
+app.get("/get-all-staff-requests", async (req, res) => {
+  try {
+    const staffRequestsCollection = db.collection("staff_requests");
+
+    const requests = await staffRequestsCollection
+      .find({})
+      .sort({ createdAt: -1 })
+      .toArray();
+
+    res.json(requests);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: "Failed to fetch staff requests" });
+  }
+});
+
+app.put("/update-staff-request-status", async (req, res) => {
+  try {
+    const { requestId, status, updatedBy } = req.body;
+
+    if (!requestId || !status || !updatedBy) {
+      return res.status(400).json({ message: "Missing required fields" });
+    }
+
+    const staffRequestsCollection = db.collection("staff_requests");
+
+    const result = await staffRequestsCollection.updateOne(
+      { _id: new ObjectId(requestId) },
+      {
+        $set: {
+          status,
+          statusUpdatedBy: updatedBy,
+          statusUpdatedAt: new Date(),
+          updatedAt: new Date(),
+        },
+      },
+    );
+
+    if (result.matchedCount === 0) {
+      return res.status(404).json({ message: "Request not found" });
+    }
+
+    res.json({
+      success: true,
+      message: "Request status updated successfully",
+    });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: "Failed to update request status" });
+  }
+});
+
+/* =========================
+   Email Functions
+========================= */
+
+async function sendWelcomeEmail(email, username) {
+  const mailOptions = {
+    from: `"Parirenyatwa Nursing School" <admin@pari-nursing-school.org>`,
+    to: email,
+    subject: "Welcome to Parirenyatwa Nursing School Information System",
+    html: `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <style>
+          body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            max-width: 600px;
+            margin: 0 auto;
+            padding: 20px;
+          }
+          .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+            border-radius: 10px 10px 0 0;
+          }
+          .header h1 {
+            margin: 0;
+            font-size: 24px;
+          }
+          .content {
+            background: #f9f9f9;
+            padding: 30px;
+            border-radius: 0 0 10px 10px;
+          }
+          .welcome-message {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            border-left: 4px solid #667eea;
+          }
+          .info-box {
+            background: white;
+            padding: 15px;
+            border-radius: 8px;
+            margin: 15px 0;
+          }
+          .footer {
+            text-align: center;
+            margin-top: 30px;
+            padding-top: 20px;
+            border-top: 1px solid #ddd;
+            color: #666;
+            font-size: 14px;
+          }
+          .button {
+            display: inline-block;
+            padding: 12px 30px;
+            background: #667eea;
+            color: white;
+            text-decoration: none;
+            border-radius: 5px;
+            margin: 15px 0;
+          }
+        </style>
+      </head>
+      <body>
+        <div class="header">
+          <h1>🎓 Welcome to Parirenyatwa Nursing School</h1>
+          <p style="margin: 5px 0 0 0;">Information Management System</p>
+        </div>
+
+        <div class="content">
+          <div class="welcome-message">
+            <h2 style="color: #667eea; margin-top: 0;">Hello ${username}!</h2>
+            <p>We're excited to welcome you to the Parirenyatwa Nursing School Information System. Your account has been successfully created!</p>
+          </div>
+
+          <div class="info-box">
+            <h3 style="color: #333; margin-top: 0;">✅ What's Next?</h3>
+            <ul style="color: #666;">
+              <li>Log in to your account using your username and password</li>
+              <li>Complete your profile information</li>
+              <li>Explore the dashboard and available features</li>
+              <li>Check notices and upcoming events</li>
+            </ul>
+          </div>
+
+          <div class="info-box">
+            <h3 style="color: #333; margin-top: 0;">🔐 Account Security</h3>
+            <p style="color: #666; margin: 0;">
+              Please keep your login credentials secure and do not share them with anyone. 
+              If you need to reset your password, you can do so from the login page.
+            </p>
+          </div>
+
+          <div style="text-align: center; margin: 25px 0;">
+            <a href="https://pari-nursing-school.org" class="button">
+              Access Your Account
+            </a>
+          </div>
+
+          <div class="info-box">
+            <h3 style="color: #333; margin-top: 0;">📞 Need Help?</h3>
+            <p style="color: #666; margin: 0;">
+              If you have any questions or need assistance, please contact our support team 
+              or reach out to your program administrator.
+            </p>
+          </div>
+        </div>
+
+        <div class="footer">
+          <p><strong>Parirenyatwa Nursing School</strong></p>
+          <p style="margin: 5px 0;">Excellence in Nursing Education</p>
+          <p style="margin: 5px 0; font-size: 12px;">
+            This is an automated message. Please do not reply to this email.
+          </p>
+        </div>
+      </body>
+      </html>
+    `,
+  };
+
+  try {
+    await transporter.sendMail(mailOptions);
+    console.log(`✅ Welcome email sent to ${email}`);
+  } catch (error) {
+    console.error("❌ Error sending welcome email:", error.message);
+  }
+}
+
+async function sendHousingEmail(email, username, action, details) {
+  const actionConfig = {
+    assigned: {
+      subject: "Room Assignment - Parirenyatwa Nursing School",
+      color: "#10B981",
+      icon: "🏠",
+      heading: "Room Assignment Confirmation",
+      message: `You have been successfully assigned to a room.`,
+    },
+    moved: {
+      subject: "Room Transfer - Parirenyatwa Nursing School",
+      color: "#2563EB",
+      icon: "🔄",
+      heading: "Room Transfer Confirmation",
+      message: `Your room assignment has been updated.`,
+    },
+    deactivated: {
+      subject: "Room Deactivation - Parirenyatwa Nursing School",
+      color: "#EF4444",
+      icon: "📦",
+      heading: "Room Deactivation Notice",
+      message: `Your room assignment has been deactivated.`,
+    },
+  };
+
+  const config = actionConfig[action];
+
+  const detailsHTML = Object.entries(details)
+    .map(
+      ([key, value]) => `
+      <tr>
+        <td style="padding: 10px; font-weight: bold; color: #374151; background: #F9FAFB; border: 1px solid #E5E7EB; width: 40%">${key}</td>
+        <td style="padding: 10px; color: #6B7280; border: 1px solid #E5E7EB;">${value}</td>
+      </tr>`,
+    )
+    .join("");
+
+  const mailOptions = {
+    from: `"Parirenyatwa Nursing School" <admin@pari-nursing-school.org>`,
+    to: email,
+    subject: config.subject,
+    html: `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <style>
+          body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px; }
+        </style>
+      </head>
+      <body>
+        <div style="background: linear-gradient(135deg, ${config.color}, ${config.color}cc); color: white; padding: 30px; text-align: center; border-radius: 10px 10px 0 0;">
+          <h1 style="margin: 0; font-size: 24px;">${config.icon} ${config.heading}</h1>
+          <p style="margin: 8px 0 0 0; opacity: 0.9;">Parirenyatwa Nursing School</p>
+        </div>
+
+        <div style="background: #f9f9f9; padding: 30px; border-radius: 0 0 10px 10px;">
+          <div style="background: white; padding: 20px; border-radius: 8px; margin-bottom: 20px; border-left: 4px solid ${config.color};">
+            <h2 style="color: ${config.color}; margin-top: 0;">Hello ${username}!</h2>
+            <p style="color: #4B5563; margin: 0;">${config.message}</p>
+          </div>
+
+          <div style="background: white; padding: 20px; border-radius: 8px; margin-bottom: 20px;">
+            <h3 style="color: #111827; margin-top: 0;">📋 Assignment Details</h3>
+            <table style="width: 100%; border-collapse: collapse;">
+              ${detailsHTML}
+            </table>
+          </div>
+
+          <div style="background: white; padding: 15px; border-radius: 8px; border-left: 4px solid #F59E0B;">
+            <p style="color: #92400E; margin: 0; font-size: 0.9rem;">
+              ⚠️ If you believe this is an error or have any concerns, please contact your warden or the allocation office immediately.
+            </p>
+          </div>
+        </div>
+
+        <div style="text-align: center; margin-top: 20px; padding-top: 20px; border-top: 1px solid #ddd; color: #9CA3AF; font-size: 13px;">
+          <p><strong style="color: #374151;">Parirenyatwa Nursing School</strong></p>
+          <p style="margin: 4px 0;">Excellence in Nursing Education</p>
+          <p style="margin: 4px 0; font-size: 11px;">This is an automated message. Please do not reply to this email.</p>
+        </div>
+      </body>
+      </html>
+    `,
+  };
+
+  try {
+    await transporter.sendMail(mailOptions);
+    console.log(`✅ Housing ${action} email sent to ${email}`);
+  } catch (error) {
+    console.error(`❌ Error sending housing email:`, error.message);
+  }
+}
+
+/* =========================
+   Maintenance Reports Routes
+   (Technician visit logs)
+========================= */
+
+// Add a new maintenance report (with optional image upload)
+app.post(
+  "/add-maintenance-report",
+  upload.single("image"),
+  async (req, res) => {
+    try {
+      const {
+        house,
+        roomNumber,
+        item,
+        details,
+        technicianName,
+        workDone,
+        status,
+        visitDate,
+        nextVisitDate,
+        reportedBy,
+      } = req.body;
+
+      if (!house || !item || !visitDate || !technicianName) {
+        return res.status(400).json({ message: "Missing required fields" });
+      }
+
+      const maintenanceReportsCollection = db.collection("maintenance_reports");
+
+      // Generate report ID e.g. MR-2026-001
+      const year = new Date().getFullYear();
+      const count = await maintenanceReportsCollection.countDocuments();
+      const reportId = `MR-${year}-${String(count + 1).padStart(3, "0")}`;
+
+      // Upload image to Cloudinary if provided
+      let imageUrl = null;
+      if (req.file) {
+        const result = await cloudinary.uploader.upload(req.file.path, {
+          folder: "maintenance_reports",
+        });
+        fs.unlinkSync(req.file.path);
+        imageUrl = result.secure_url;
+      }
+
+      const result = await maintenanceReportsCollection.insertOne({
+        reportId,
+        house,
+        roomNumber: roomNumber || null,
+        item,
+        details: details || "",
+        technicianName,
+        workDone: workDone || "",
+        status: status || "In Progress",
+        visitDate,
+        nextVisitDate: nextVisitDate || null,
+        imageUrl,
+        reportedBy: reportedBy || "Technician",
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+
+      res.json({ success: true, reportId: result.insertedId });
+    } catch (error) {
+      console.error(error);
+      res.status(500).json({ message: "Failed to add maintenance report" });
+    }
+  },
+);
+
+// Get all maintenance reports
+app.get("/get-maintenance-reports", async (req, res) => {
+  try {
+    const maintenanceReportsCollection = db.collection("maintenance_reports");
+    const reports = await maintenanceReportsCollection
+      .find({})
+      .sort({ createdAt: -1 })
+      .toArray();
+
+    res.json(reports);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: "Failed to fetch maintenance reports" });
+  }
+});
+
+// Update a maintenance report (with optional new image)
+app.put(
+  "/update-maintenance-report/:id",
+  upload.single("image"),
+  async (req, res) => {
+    try {
+      const { id } = req.params;
+
+      if (!ObjectId.isValid(id)) {
+        return res.status(400).json({ error: "Invalid report ID" });
+      }
+
+      const {
+        house,
+        roomNumber,
+        item,
+        details,
+        technicianName,
+        workDone,
+        status,
+        visitDate,
+        nextVisitDate,
+      } = req.body;
+
+      const maintenanceReportsCollection = db.collection("maintenance_reports");
+
+      const updateData = {
+        updatedAt: new Date(),
+      };
+
+      if (house) updateData.house = house;
+      if (roomNumber) updateData.roomNumber = roomNumber;
+      if (item) updateData.item = item;
+      if (details) updateData.details = details;
+      if (technicianName) updateData.technicianName = technicianName;
+      if (workDone) updateData.workDone = workDone;
+      if (status) updateData.status = status;
+      if (visitDate) updateData.visitDate = visitDate;
+      if (nextVisitDate) updateData.nextVisitDate = nextVisitDate;
+
+      // Upload new image if provided
+      if (req.file) {
+        const result = await cloudinary.uploader.upload(req.file.path, {
+          folder: "maintenance_reports",
+        });
+        fs.unlinkSync(req.file.path);
+        updateData.imageUrl = result.secure_url;
+      }
+
+      const result = await maintenanceReportsCollection.updateOne(
+        { _id: new ObjectId(id) },
+        { $set: updateData },
+      );
+
+      if (result.matchedCount === 0) {
+        return res.status(404).json({ message: "Report not found" });
+      }
+
+      res.json({ success: true, message: "Report updated successfully" });
+    } catch (error) {
+      console.error(error);
+      res.status(500).json({ message: "Failed to update report" });
+    }
+  },
+);
+
+/* Sending email to maintenance dashboard */
+async function sendReportNotificationEmail(reportType, reportData, imageUrl) {
+  const isFaultReport = reportType === "fault";
+
+  const config = {
+    subject: isFaultReport
+      ? `New Fault Report ${reportData.faultReportId} - ${reportData.house}`
+      : `New Facility Report ${reportData.facilityReportId} - ${reportData.dorm}`,
+    icon: isFaultReport ? "🔧" : "🏗️",
+    heading: isFaultReport
+      ? "Fault Report Submitted"
+      : "Facility Damage Report Submitted",
+    color: isFaultReport ? "#F59E0B" : "#EF4444",
+  };
+
+  const detailsHTML = isFaultReport
+    ? `
+      <tr><td style="padding:10px;font-weight:bold;background:#F9FAFB;border:1px solid #E5E7EB;width:40%">Report ID</td><td style="padding:10px;border:1px solid #E5E7EB;">${reportData.faultReportId}</td></tr>
+      <tr><td style="padding:10px;font-weight:bold;background:#F9FAFB;border:1px solid #E5E7EB;">House</td><td style="padding:10px;border:1px solid #E5E7EB;">${reportData.house}</td></tr>
+      <tr><td style="padding:10px;font-weight:bold;background:#F9FAFB;border:1px solid #E5E7EB;">Room Number</td><td style="padding:10px;border:1px solid #E5E7EB;">${reportData.roomNumber}</td></tr>
+      <tr><td style="padding:10px;font-weight:bold;background:#F9FAFB;border:1px solid #E5E7EB;">Item</td><td style="padding:10px;border:1px solid #E5E7EB;">${reportData.item}</td></tr>
+      <tr><td style="padding:10px;font-weight:bold;background:#F9FAFB;border:1px solid #E5E7EB;">Details</td><td style="padding:10px;border:1px solid #E5E7EB;">${reportData.details || "N/A"}</td></tr>
+      <tr><td style="padding:10px;font-weight:bold;background:#F9FAFB;border:1px solid #E5E7EB;">Discovery Date</td><td style="padding:10px;border:1px solid #E5E7EB;">${reportData.discoveryDate}</td></tr>
+      <tr><td style="padding:10px;font-weight:bold;background:#F9FAFB;border:1px solid #E5E7EB;">Reported By</td><td style="padding:10px;border:1px solid #E5E7EB;">${reportData.reportedBy}</td></tr>
+      <tr><td style="padding:10px;font-weight:bold;background:#F9FAFB;border:1px solid #E5E7EB;">Status</td><td style="padding:10px;border:1px solid #E5E7EB;">Pending</td></tr>
+    `
+    : `
+      <tr><td style="padding:10px;font-weight:bold;background:#F9FAFB;border:1px solid #E5E7EB;width:40%">Report ID</td><td style="padding:10px;border:1px solid #E5E7EB;">${reportData.facilityReportId}</td></tr>
+      <tr><td style="padding:10px;font-weight:bold;background:#F9FAFB;border:1px solid #E5E7EB;">Dorm</td><td style="padding:10px;border:1px solid #E5E7EB;">${reportData.dorm}</td></tr>
+      <tr><td style="padding:10px;font-weight:bold;background:#F9FAFB;border:1px solid #E5E7EB;">Facility Type</td><td style="padding:10px;border:1px solid #E5E7EB;">${reportData.facilityType}</td></tr>
+      <tr><td style="padding:10px;font-weight:bold;background:#F9FAFB;border:1px solid #E5E7EB;">Title</td><td style="padding:10px;border:1px solid #E5E7EB;">${reportData.title}</td></tr>
+      <tr><td style="padding:10px;font-weight:bold;background:#F9FAFB;border:1px solid #E5E7EB;">Description</td><td style="padding:10px;border:1px solid #E5E7EB;">${reportData.description || "N/A"}</td></tr>
+      <tr><td style="padding:10px;font-weight:bold;background:#F9FAFB;border:1px solid #E5E7EB;">Discovery Date</td><td style="padding:10px;border:1px solid #E5E7EB;">${reportData.discoveryDate}</td></tr>
+      <tr><td style="padding:10px;font-weight:bold;background:#F9FAFB;border:1px solid #E5E7EB;">Reported By</td><td style="padding:10px;border:1px solid #E5E7EB;">${reportData.reportedBy}</td></tr>
+      <tr><td style="padding:10px;font-weight:bold;background:#F9FAFB;border:1px solid #E5E7EB;">Status</td><td style="padding:10px;border:1px solid #E5E7EB;">${reportData.status || "Pending"}</td></tr>
+    `;
+
+  const imageHTML = imageUrl
+    ? `
+      <div style="background:white;padding:20px;border-radius:8px;margin-bottom:20px;">
+        <h3 style="color:#111827;margin-top:0;">📷 Attached Image</h3>
+        <img src="${imageUrl}" alt="Report Image" style="max-width:100%;border-radius:8px;border:1px solid #E5E7EB;" />
+      </div>
+    `
+    : "";
+
+  const mailOptions = {
+    from: `"Parirenyatwa Nursing School" <admin@pari-nursing-school.org>`,
+    to: process.env.REPORT_NOTIFICATION_EMAIL,
+    subject: config.subject,
+    html: `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <style>
+          body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px; }
+        </style>
+      </head>
+      <body>
+        <div style="background:linear-gradient(135deg, ${config.color}, ${config.color}cc);color:white;padding:30px;text-align:center;border-radius:10px 10px 0 0;">
+          <h1 style="margin:0;font-size:24px;">${config.icon} ${config.heading}</h1>
+          <p style="margin:8px 0 0 0;opacity:0.9;">Parirenyatwa Nursing School</p>
+        </div>
+
+        <div style="background:#f9f9f9;padding:30px;border-radius:0 0 10px 10px;">
+          <div style="background:white;padding:20px;border-radius:8px;margin-bottom:20px;border-left:4px solid ${config.color};">
+            <p style="color:#4B5563;margin:0;">A new ${isFaultReport ? "fault" : "facility damage"} report has been submitted and requires your attention.</p>
+          </div>
+
+          <div style="background:white;padding:20px;border-radius:8px;margin-bottom:20px;">
+            <h3 style="color:#111827;margin-top:0;">📋 Report Details</h3>
+            <table style="width:100%;border-collapse:collapse;">
+              ${detailsHTML}
+            </table>
+          </div>
+
+          ${imageHTML}
+
+          <div style="background:white;padding:15px;border-radius:8px;border-left:4px solid #F59E0B;">
+            <p style="color:#92400E;margin:0;font-size:0.9rem;">
+              ⚠️ Please review and assign a maintenance team as soon as possible.
+            </p>
+          </div>
+        </div>
+
+        <div style="text-align:center;margin-top:20px;padding-top:20px;border-top:1px solid #ddd;color:#9CA3AF;font-size:13px;">
+          <p><strong style="color:#374151;">Parirenyatwa Nursing School</strong></p>
+          <p style="margin:4px 0;">Excellence in Nursing Education</p>
+          <p style="margin:4px 0;font-size:11px;">This is an automated message. Please do not reply to this email.</p>
+        </div>
+      </body>
+      </html>
+    `,
+  };
+
+  try {
+    await transporter.sendMail(mailOptions);
+    console.log(`✅ Report notification email sent for ${reportType} report`);
+  } catch (error) {
+    console.error(`❌ Error sending report notification email:`, error.message);
+  }
+}
+
+async function sendPasswordResetEmail(email, username) {
+  const mailOptions = {
+    from: `"Parirenyatwa Nursing School" <admin@pari-nursing-school.org>`,
+    to: email,
+    subject: "Password Reset Confirmation - Parirenyatwa Nursing School",
+    html: `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <style>
+          body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px; }
+        </style>
+      </head>
+      <body>
+        <div style="background: linear-gradient(135deg, #3B82F6, #1D4ED8); color: white; padding: 30px; text-align: center; border-radius: 10px 10px 0 0;">
+          <h1 style="margin: 0; font-size: 24px;">🔐 Password Reset Confirmation</h1>
+          <p style="margin: 8px 0 0 0; opacity: 0.9;">Parirenyatwa Nursing School</p>
+        </div>
+
+        <div style="background: #f9f9f9; padding: 30px; border-radius: 0 0 10px 10px;">
+          <div style="background: white; padding: 20px; border-radius: 8px; margin-bottom: 20px; border-left: 4px solid #3B82F6;">
+            <h2 style="color: #3B82F6; margin-top: 0;">Hello ${username}!</h2>
+            <p style="color: #4B5563; margin: 0;">Your password has been successfully reset. You can now log in using your new password.</p>
+          </div>
+
+          <div style="background: white; padding: 20px; border-radius: 8px; margin-bottom: 20px;">
+            <h3 style="color: #111827; margin-top: 0;">📋 Reset Details</h3>
+            <table style="width: 100%; border-collapse: collapse;">
+              <tr>
+                <td style="padding: 10px; font-weight: bold; background: #F9FAFB; border: 1px solid #E5E7EB; width: 40%">Username</td>
+                <td style="padding: 10px; border: 1px solid #E5E7EB;">${username}</td>
+              </tr>
+              <tr>
+                <td style="padding: 10px; font-weight: bold; background: #F9FAFB; border: 1px solid #E5E7EB;">Date & Time</td>
+                <td style="padding: 10px; border: 1px solid #E5E7EB;">${new Date().toLocaleString(
+                  "en-US",
+                  {
+                    year: "numeric",
+                    month: "long",
+                    day: "numeric",
+                    hour: "2-digit",
+                    minute: "2-digit",
+                    hour12: true,
+                  },
+                )}</td>
+              </tr>
+              <tr>
+                <td style="padding: 10px; font-weight: bold; background: #F9FAFB; border: 1px solid #E5E7EB;">Status</td>
+                <td style="padding: 10px; border: 1px solid #E5E7EB; color: #10B981; font-weight: bold;">✅ Successful</td>
+              </tr>
+            </table>
+          </div>
+
+          <div style="background: white; padding: 15px; border-radius: 8px; border-left: 4px solid #F59E0B;">
+            <p style="color: #92400E; margin: 0; font-size: 0.9rem;">
+              ⚠️ If you did not request this password reset, please contact your administrator or warden immediately as your account may be compromised.
+            </p>
+          </div>
+        </div>
+
+        <div style="text-align: center; margin-top: 20px; padding-top: 20px; border-top: 1px solid #ddd; color: #9CA3AF; font-size: 13px;">
+          <p><strong style="color: #374151;">Parirenyatwa Nursing School</strong></p>
+          <p style="margin: 4px 0;">Excellence in Nursing Education</p>
+          <p style="margin: 4px 0; font-size: 11px;">This is an automated message. Please do not reply to this email.</p>
+        </div>
+      </body>
+      </html>
+    `,
+  };
+
+  try {
+    await transporter.sendMail(mailOptions);
+    console.log(`✅ Password reset confirmation email sent to ${email}`);
+  } catch (error) {
+    console.error("❌ Error sending password reset email:", error.message);
+  }
+}
+
+app.get("/check-super-user/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const user = await usersCollection.findOne({
+      $or: [{ studentId: id }, { staffId: id }],
+    });
+
+    if (!user) {
+      return res.status(404).json({ isSuper: false });
+    }
+
+    res.json({ isSuper: user.super === "true" });
+  } catch (error) {
+    res.status(500).json({ isSuper: false });
+  }
+});
+
+app.get("/home", (req, res) => {
+  res.status(200).json("Welcome, your app is working well");
 });
 
 /* =========================
@@ -1599,4 +2659,3 @@ app.post("/reset-password", async (req, res) => {
 // });
 
 startServer();
-
